@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterable, Generator
+from collections.abc import AsyncGenerator, AsyncIterable, Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 import logging
 from typing import Literal, TypedDict
 
@@ -36,12 +36,18 @@ def async_get_chat_log(
     hass: HomeAssistant,
     session: chat_session.ChatSession,
     user_input: ConversationInput | None = None,
+    *,
+    chat_log_delta_listener: Callable[[ChatLog, dict], None] | None = None,
 ) -> Generator[ChatLog]:
     """Return chat log for a specific chat session."""
     if chat_log := current_chat_log.get():
         # If a chat log is already active and it's the requested conversation ID,
         # return that. We won't update the last updated time in this case.
         if chat_log.conversation_id == session.conversation_id:
+            if chat_log_delta_listener is not None:
+                raise RuntimeError(
+                    "Cannot attach chat log delta listener unless initial caller"
+                )
             yield chat_log
             return
 
@@ -56,6 +62,9 @@ def async_get_chat_log(
         chat_log = replace(chat_log, content=chat_log.content.copy())
     else:
         chat_log = ChatLog(hass, session.conversation_id)
+
+    if chat_log_delta_listener:
+        chat_log.delta_listener = chat_log_delta_listener
 
     if user_input is not None:
         chat_log.async_add_user_content(UserContent(content=user_input.text))
@@ -80,6 +89,9 @@ def async_get_chat_log(
             all_chat_logs.pop(session.conversation_id)
 
         session.async_on_cleanup(do_cleanup)
+
+    if chat_log_delta_listener:
+        chat_log.delta_listener = None
 
     all_chat_logs[session.conversation_id] = chat_log
 
@@ -163,6 +175,7 @@ class ChatLog:
     content: list[Content] = field(default_factory=lambda: [SystemContent(content="")])
     extra_system_prompt: str | None = None
     llm_api: llm.APIInstance | None = None
+    delta_listener: Callable[[ChatLog, dict], None] | None = None
 
     @property
     def unresponded_tool_results(self) -> bool:
@@ -273,6 +286,8 @@ class ChatLog:
                             self.llm_api.async_call_tool(tool_call),
                             name=f"llm_tool_{tool_call.id}",
                         )
+                if self.delta_listener:
+                    self.delta_listener(self, delta)  # type: ignore[arg-type]
                 continue
 
             # Starting a new message
@@ -292,9 +307,14 @@ class ChatLog:
                     content, tool_call_tasks=tool_call_tasks
                 ):
                     yield tool_result
+                    if self.delta_listener:
+                        self.delta_listener(self, asdict(tool_result))
 
             current_content = delta.get("content") or ""
             current_tool_calls = delta.get("tool_calls") or []
+
+            if self.delta_listener:
+                self.delta_listener(self, delta)  # type: ignore[arg-type]
 
         if current_content or current_tool_calls:
             content = AssistantContent(
@@ -307,6 +327,8 @@ class ChatLog:
                 content, tool_call_tasks=tool_call_tasks
             ):
                 yield tool_result
+                if self.delta_listener:
+                    self.delta_listener(self, asdict(tool_result))
 
     async def async_update_llm_data(
         self,
