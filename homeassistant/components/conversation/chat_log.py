@@ -54,9 +54,7 @@ def async_get_chat_log(
         all_chat_logs = {}
         hass.data[DATA_CHAT_LOGS] = all_chat_logs
 
-    chat_log = all_chat_logs.get(session.conversation_id)
-
-    if chat_log:
+    if chat_log := all_chat_logs.get(session.conversation_id):
         chat_log = replace(chat_log, content=chat_log.content.copy())
     else:
         chat_log = ChatLog(hass, session.conversation_id)
@@ -399,12 +397,10 @@ class ChatLog:
         if llm_api:
             prompt_parts.append(llm_api.api_prompt)
 
-        extra_system_prompt = (
+        if extra_system_prompt := (
             # Take new system prompt if one was given
             user_input.extra_system_prompt or self.extra_system_prompt
-        )
-
-        if extra_system_prompt:
+        ):
             prompt_parts.append(extra_system_prompt)
 
         prompt = "\n".join(prompt_parts)
