@@ -3,7 +3,6 @@
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
-from freezegun import freeze_time
 from httpx import Response
 from openai import RateLimitError
 from openai.types.chat.chat_completion_chunk import (
@@ -251,17 +250,17 @@ async def test_function_call(
         }
     )
 
-    with freeze_time("2024-06-03 23:00:00"):
-        result = await conversation.async_converse(
-            hass,
-            "Please call the test function",
-            mock_chat_log.conversation_id,
-            Context(),
-            agent_id="conversation.openai",
-        )
+    result = await conversation.async_converse(
+        hass,
+        "Please call the test function",
+        mock_chat_log.conversation_id,
+        Context(),
+        agent_id="conversation.openai",
+    )
 
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
-    assert mock_chat_log.content == snapshot
+    # Don't test the prompt, as it's not deterministic
+    assert mock_chat_log.content[1:] == snapshot
 
 
 @pytest.mark.parametrize(
