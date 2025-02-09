@@ -38,15 +38,16 @@ def async_get_chat_log(
     user_input: ConversationInput | None = None,
 ) -> Generator[ChatLog]:
     """Return chat log for a specific chat session."""
-    if chat_log := current_chat_log.get():
-        # If a chat log is already active and it's the requested conversation ID,
-        # return that. We won't update the last updated time in this case.
-        if chat_log.conversation_id == session.conversation_id:
-            if user_input is not None:
-                chat_log.async_add_user_content(UserContent(content=user_input.text))
+    # If a chat log is already active and it's the requested conversation ID,
+    # return that. We won't update the last updated time in this case.
+    if (
+        chat_log := current_chat_log.get()
+    ) and chat_log.conversation_id == session.conversation_id:
+        if user_input is not None:
+            chat_log.async_add_user_content(UserContent(content=user_input.text))
 
-            yield chat_log
-            return
+        yield chat_log
+        return
 
     all_chat_logs = hass.data.get(DATA_CHAT_LOGS)
     if all_chat_logs is None:
