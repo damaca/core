@@ -1,7 +1,6 @@
 """Tests for the OpenAI integration."""
 
 from collections.abc import Generator
-from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, patch
 
 from freezegun import freeze_time
@@ -18,14 +17,17 @@ import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.components import conversation
-from homeassistant.components.conversation import chat_log
 from homeassistant.components.homeassistant.exposed_entities import async_expose_entity
 from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.helpers import chat_session, intent
+from homeassistant.helpers import intent
 from homeassistant.setup import async_setup_component
 
 from tests.common import MockConfigEntry
+from tests.components.conversation import (
+    MockChatLog,
+    mock_chat_log,  # noqa: F401
+)
 
 ASSIST_RESPONSE_FINISH = (
     # Assistant message
@@ -64,66 +66,6 @@ def mock_create_stream() -> Generator[AsyncMock]:
         )
 
         yield mock_create
-
-
-@dataclass
-class MockChatLog(chat_log.ChatLog):
-    """Mock chat log."""
-
-    _mock_tool_results: dict = field(default_factory=dict)
-
-    def mock_tool_results(self, results: dict) -> None:
-        """Set tool results."""
-        self._mock_tool_results = results
-
-    @property
-    def llm_api(self):
-        """Return LLM API."""
-        return self._llm_api
-
-    @llm_api.setter
-    def llm_api(self, value):
-        """Set LLM API."""
-        self._llm_api = value
-
-        if not value:
-            return
-
-        async def async_call_tool(tool_input):
-            """Call tool."""
-            if tool_input.id not in self._mock_tool_results:
-                raise ValueError(f"Tool {tool_input.id} not found")
-            return self._mock_tool_results[tool_input.id]
-
-        self._llm_api.async_call_tool = async_call_tool
-
-    def latest_content(self) -> list[conversation.Content]:
-        """Return content from latest version chat log.
-
-        The chat log makes copies until it's committed. Helper to get latest content.
-        """
-        with (
-            chat_session.async_get_chat_session(
-                self.hass, self.conversation_id
-            ) as session,
-            conversation.async_get_chat_log(self.hass, session) as chat_log,
-        ):
-            return chat_log.content
-
-
-@pytest.fixture
-async def mock_chat_log(hass: HomeAssistant) -> MockChatLog:
-    """Return mock chat logs."""
-    with (
-        patch(
-            "homeassistant.components.conversation.chat_log.ChatLog",
-            MockChatLog,
-        ),
-        chat_session.async_get_chat_session(hass, "mock-conversation-id") as session,
-        conversation.async_get_chat_log(hass, session) as chat_log,
-    ):
-        chat_log.async_add_user_content(conversation.UserContent("hello"))
-        return chat_log
 
 
 async def test_entity(
@@ -189,7 +131,7 @@ async def test_function_call(
     mock_config_entry_with_assist: MockConfigEntry,
     mock_init_component,
     mock_create_stream: AsyncMock,
-    mock_chat_log: MockChatLog,
+    mock_chat_log: MockChatLog,  # noqa: F811
     snapshot: SnapshotAssertion,
 ) -> None:
     """Test function call from the assistant."""
@@ -313,13 +255,13 @@ async def test_function_call(
         result = await conversation.async_converse(
             hass,
             "Please call the test function",
-            "mock-conversation-id",
+            mock_chat_log.conversation_id,
             Context(),
             agent_id="conversation.openai",
         )
 
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
-    assert mock_chat_log.latest_content() == snapshot
+    assert mock_chat_log.content == snapshot
 
 
 @pytest.mark.parametrize(
@@ -430,7 +372,7 @@ async def test_function_call_invalid(
     mock_config_entry_with_assist: MockConfigEntry,
     mock_init_component,
     mock_create_stream: AsyncMock,
-    mock_chat_log: MockChatLog,
+    mock_chat_log: MockChatLog,  # noqa: F811
     description: str,
     messages: tuple[ChatCompletionChunk],
 ) -> None:

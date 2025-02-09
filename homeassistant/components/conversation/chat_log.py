@@ -42,6 +42,9 @@ def async_get_chat_log(
         # If a chat log is already active and it's the requested conversation ID,
         # return that. We won't update the last updated time in this case.
         if chat_log.conversation_id == session.conversation_id:
+            if user_input is not None:
+                chat_log.async_add_user_content(UserContent(content=user_input.text))
+
             yield chat_log
             return
 
